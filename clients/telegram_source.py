@@ -22,7 +22,7 @@ import stat
 import sys
 import time
 
-from omp_outbox import Outbox
+from omp_outbox import Outbox, event_fingerprint
 
 
 def load_module(file, name):
@@ -41,11 +41,30 @@ def default_event(chat_id, msg):
     }}
 
 
+def capture_message(outbox, event, *, cursor=None, edited=False):
+    """Telegram messages can change between live delivery and history catch-up.
+
+    Keep the original source ID for its first immutable version. A changed
+    payload gets a deterministic revision ID, never a conflicting retry under
+    the original ID. Generic outbox callers retain strict conflict detection.
+    """
+    if event is not None:
+        original_id = event["eventId"]
+        fingerprint = event_fingerprint(event)
+        known = outbox.known_fingerprint(original_id)
+        if (known is not None and known != fingerprint) or (known is None and edited):
+            event = dict(event)
+            event["eventId"] = f"{original_id[:128]}:revision:{fingerprint[:20]}"
+            if isinstance(event.get("data"), dict):
+                event["data"] = {**event["data"], "sourceEventId": original_id, "sourceRevision": fingerprint[:20]}
+    outbox.enqueue(event, cursor=cursor)
+
+
 async def collect(client, entity, chat_id, outbox, build_event):
     """Paginate all messages since the durable cursor. Never cap catch-up at 20."""
     cursor = outbox.cursor()
     async for msg in client.iter_messages(entity, min_id=cursor or 0, reverse=True):
-        outbox.enqueue(build_event(chat_id, msg), cursor=msg.id)
+        capture_message(outbox, build_event(chat_id, msg), cursor=msg.id)
 
 
 async def run(config_file, retry_blocked=False):
@@ -79,11 +98,12 @@ async def run(config_file, retry_blocked=False):
             async def handler(event):
                 try:
                     # Live arrivals never move the contiguous history cursor.
-                    outbox.enqueue(build_event(chat_id, event.message))
+                    capture_message(outbox, build_event(chat_id, event.message), edited=isinstance(event, events.MessageEdited.Event))
                 except Exception as exc:
                     print(json.dumps({"sourceError": type(exc).__name__, "messageId": event.message.id}), flush=True)
 
             client.add_event_handler(handler, events.NewMessage(chats=[chat_id]))
+            client.add_event_handler(handler, events.MessageEdited(chats=[chat_id]))
 
             async def sender():
                 while not stop.is_set():

@@ -24,7 +24,7 @@ test("source outbox retains failed/paused deliveries, catches up beyond 20 messa
 import asyncio, json, sys
 from pathlib import Path
 from omp_outbox import Outbox
-from telegram_source import collect
+from telegram_source import collect, capture_message
 async def main():
     directory, url, token_file = sys.argv[1:]
     file=Path(directory)/'outbox.sqlite'
@@ -59,8 +59,22 @@ async def main():
     # Live arrival does not skip historical progress.
     box.enqueue({'eventId':'live:100','type':'test.message','data':{}})
     assert box.cursor()==78
+    # Telegram may edit a message between live delivery and history catch-up.
+    # Changed versions get stable new IDs instead of crashing or conflicting.
+    first={'eventId':'telegram:mutable:1','type':'telegram.message','data':{'text':'first'}}
+    edited={'eventId':'telegram:mutable:1','type':'telegram.message','data':{'text':'edited'}}
+    capture_message(box,first)
+    capture_message(box,edited)
+    capture_message(box,edited,edited=True)
+    versions=box.db.execute("SELECT id FROM events WHERE id LIKE 'telegram:mutable:1%'").fetchall()
+    assert len(versions)==2 and any(':revision:' in r[0] for r in versions)
+    try:
+        box.enqueue(edited)
+        raise AssertionError('generic immutable ID conflicts must still fail')
+    except ValueError:
+        pass
     box.close()
-    print(json.dumps({'retainedOnFailure':True,'pausedWasNotDuplicate':True,'blockedConflict':True,'catchupMessages':76,'cursor':78}))
+    print(json.dumps({'retainedOnFailure':True,'pausedWasNotDuplicate':True,'blockedConflict':True,'catchupMessages':76,'cursor':78,'mutableVersions':2}))
 asyncio.run(main())`;
   const result = await new Promise((resolve, reject) => {
     const child = spawn("python3", ["-c", script, root, `http://127.0.0.1:${server.address().port}/v1/events/test`, tokenFile], { env: { ...process.env, PYTHONPATH: path.resolve(import.meta.dirname, "../clients"), PYTHONDONTWRITEBYTECODE: "1" }, stdio: ["ignore", "pipe", "pipe"] });

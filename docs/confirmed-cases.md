@@ -35,3 +35,9 @@ v0.5.1 adds compatibility intake for unimported legacy routes. Migration and int
 With no prior task description, an agent given only “set a check every five minutes” inferred a monitoring objective from a file in its working directory and created a task. It also presented a returned UTC due time as Moscow local time. Those are agent-facing behavior defects, distinct from queue execution correctness.
 
 Routing guidance now requires one concise clarification when the objective is absent, prohibits inferring it from arbitrary filenames, and allows a generic current-chat webhook without demanding technical parameters. Prompt edits can identify a trigger from conversation instead of demanding its ID. Tool results include an explicit `nextRunAtLocal` label, with a timezone regression check for Moscow UTC+3. Ordinary-language probes must run in a clean working folder with test plans and controller artifacts outside the agent's readable scope; a contaminated exploratory probe is not accepted as evidence.
+
+## Observed in the live Telegram source: edited message stopped catch-up
+
+The source stopped with `ValueError: source event changed under the same ID`. A bounded readback of those channel messages confirmed Telegram edit timestamps and changed `data.text` compared with the durable outbox. Previously accepted events remained preserved, but the stopped source could not collect more events.
+
+v0.5.2 treats observed Telegram message versions as distinct immutable events with deterministic revision IDs, preserving the initial ID for the first version. It also subscribes to live MessageEdited notifications. Identical observations of an edited version deduplicate; generic outbox callers still reject changed payloads under an immutable ID. The regression covers both repeated edited observations and unchanged generic conflict protection. This does not claim complete recovery of every old edit made while a source was disconnected.

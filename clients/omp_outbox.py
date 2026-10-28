@@ -18,6 +18,11 @@ from pathlib import Path
 from omp_events import emit
 
 
+def event_fingerprint(event):
+    body = json.dumps(event, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(body.encode()).hexdigest()
+
+
 class Outbox:
     def __init__(self, file, source_key):
         self.file = Path(file)
@@ -48,6 +53,10 @@ class Outbox:
     def cursor(self):
         row = self.db.execute("SELECT value FROM metadata WHERE key='cursor'").fetchone()
         return int(row[0]) if row else None
+
+    def known_fingerprint(self, event_id):
+        row = self.db.execute("SELECT fingerprint FROM events WHERE id=?", (event_id,)).fetchone()
+        return row[0] if row else None
 
     def enqueue(self, event, *, cursor=None):
         """Filtering may pass event=None while advancing a scanned source cursor."""
