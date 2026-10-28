@@ -30,6 +30,8 @@ For an existing chat, reload the extension. No additional skill or slash-command
 
 See [upgrading v0.4](#upgrading-v04) before reloading an older installation.
 
+If a request says only “check every five minutes” without establishing what to check, the agent should ask one short question before saving a task. It must not invent the objective from whatever files happen to exist. “Create a webhook for this chat” can be completed directly with a safe default instruction to summarize incoming events. Later edits refer to the trigger conversationally; users need not know IDs or JSON. Schedule results include `nextRunAtLocal` with the timezone explicitly labeled alongside the authoritative UTC timestamp.
+
 ## Unified agent interface
 
 OMP mounts the tool as `xd://trigger_manage`. Invoke it with the `write` tool and JSON content. There is no session selector: the binding is taken from the executing agent's saved session.
@@ -163,12 +165,12 @@ The runtime Unix registry retains `$OMP_SESSION_BRIDGE_DIR`, `$XDG_RUNTIME_DIR/o
 
 ## Upgrading v0.4
 
-1. Close or reload old OMP runtimes before reattaching those chats. Already-running v0.4 schedulers retain their ownership; their files are deferred, rather than migrated underneath them.
-2. Stop the old receiver with `omp-events stop`, wait for it to exit, then `omp-events start` using the new version. Port, webhook IDs and token files are retained.
+1. Already-running v0.4 schedulers retain their ownership and continue running. Their webhooks remain available through a compatibility intake into the legacy inbox. Their files are deferred, rather than migrated underneath them. Reload those runtimes to expose the new tool; existing cached code does not update automatically.
+2. Stop the old receiver with `omp-events stop`, wait for it to exit, then `omp-events start` using the new version. Port, webhook IDs and token files are retained. The v0.5.1 receiver serves both live legacy inboxes and migrated SQLite triggers.
 3. Reload/resume each saved OMP chat. No model/provider/auth reset is required.
 4. Inspect `trigger_manage status`, `list` and `history`. Use `reconcile` for ambiguous legacy runs with a saved final reply.
 
-Nonempty legacy JSON is copied to an owner-only `migration-v1-backup` snapshot before transactional import. Imported files are recorded once. Empty schedule files are tracked by size/mtime; live ownership is rechecked for changed data. Old files remain for recovery, but are no longer authoritative for migrated definitions. Do not intentionally run a cached v0.4 extension against a migrated binding; reload it first. Existing events, receipt IDs, prompts, dedup fingerprints and tokens are preserved. Inflight legacy events without confirmation remain uncertain. The service will not kill unrelated OMP runtimes to perform migration.
+Nonempty legacy JSON is copied to an owner-only `migration-v1-backup` snapshot before transactional import. Imported files are recorded once. Empty schedule files are tracked by size/mtime; live ownership is rechecked for changed data. Old files remain for recovery, but are no longer authoritative for migrated definitions. Do not intentionally run a cached v0.4 extension against a migrated binding; reload it first. Existing events, receipt IDs, prompts, dedup fingerprints and tokens are preserved. Inflight legacy events without confirmation remain uncertain. The service will not kill unrelated OMP runtimes to perform migration. Route migration and compatibility intake share a lock: events arriving during handoff are either included in the imported snapshot or admitted directly to SQLite. Registration performs a migration pass so a resumed chat does not wait for the periodic sweep.
 
 ## Verification and design
 

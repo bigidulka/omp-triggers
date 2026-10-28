@@ -25,6 +25,8 @@ flowchart LR
 - **Run**: one queued execution, event identity, frozen revision at claim, runtime owner, lifecycle timestamps and response evidence. Coalesced events can share a run while retaining their own dedup receipt.
 - **Runtime lease**: a single owner for a canonical saved-file/cwd binding. Only that owner claims/acknowledges its runs. Dead runtime ownership makes inflight work uncertain, never silently replayable. A missed heartbeat alone never permits takeover of a still-live OMP process. Ownership survives a service restart.
 
+During mixed-version operation, unimported routes use the legacy inbox until its live owner releases the saved chat. HTTP intake and route migration share the legacy route lock and recheck SQLite authority within it. A new runtime imports available state before registration; migrated routes never fall back to old credentials.
+
 SQLite is imported only by the standalone Node service. OMP's native/Bun host uses authenticated loopback HTTP and has no SQLite compatibility requirement. The control credential is separate from all webhook credentials; producer credentials cannot invoke management or choose a session. A reverse proxy must expose only the event route, not management.
 
 ## Atomic boundaries

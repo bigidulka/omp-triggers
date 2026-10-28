@@ -1,6 +1,6 @@
 {
   "name": "omp-triggers",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Wake an OMP agent in the same chat with schedules, incoming webhooks and external script signals",
   "type": "module",
   "license": "MIT",

@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { Scheduler } from "../lib/scheduler.mjs";
-import { compactIdentity, compactRun, compactTask } from "../lib/tool-contract.mjs";
+import { compactIdentity, compactRun, compactTask, humanTrigger } from "../lib/tool-contract.mjs";
 
 async function scheduler(t, directory, binding) {
   const value = new Scheduler({ binding, directory, dispatch: () => {} });
@@ -32,4 +32,11 @@ test("compact projections omit binding, hashes, and prompt from list/history", (
   assert.deepEqual(task, { id: "t", kind: "every", spec: "60000ms", state: "active", next: "2026-01-01T00:01:00Z" });
   assert.deepEqual(run, { id: "r", taskId: "t", state: "settled", reason: "manual", at: "2026-01-01T00:00:00Z" });
   assert.deepEqual(compactIdentity({ sessionId: "session-a", cwd: "/project", sessionFile: "/private" }), { sessionId: "session-a", cwd: "/project" });
+});
+
+test("schedule display labels Moscow time explicitly instead of relabeling UTC", () => {
+  const t = humanTrigger({ nextRunAt: "2026-10-28T13:44:41.000Z", schedule: { timezone: "Europe/Moscow" } });
+  assert.equal(t.nextRunAt, "2026-10-28T13:44:41.000Z");
+  assert.match(t.nextRunAtLocal, /16:44:41 GMT\+3 \[Europe\/Moscow\]/);
+  assert.match(humanTrigger({ ...t, schedule: { timezone: "local" } }).nextRunAtLocal, /13:44:41 GMT(?:\+0)? \[UTC\]/);
 });
