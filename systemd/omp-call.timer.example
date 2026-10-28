@@ -1,0 +1,11 @@
+# ~/.config/systemd/user/omp-call.timer
+[Unit]
+Description=Periodically invoke OMP through omp-session-bridge
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+Unit=omp-call.service
+
+[Install]
+WantedBy=timers.target

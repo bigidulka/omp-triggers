@@ -1,0 +1,64 @@
+{
+  "name": "omp-triggers",
+  "version": "0.4.0",
+  "description": "Wake an OMP agent in the same chat with schedules, incoming webhooks and external script signals",
+  "type": "module",
+  "license": "MIT",
+  "keywords": [
+    "omp-plugin",
+    "omp",
+    "agent",
+    "triggers",
+    "webhook",
+    "scheduler",
+    "events",
+    "automation"
+  ],
+  "files": [
+    "index.ts",
+    "extensions",
+    "lib",
+    "bin",
+    "clients/*.py",
+    "systemd",
+    "README.md",
+    "LICENSE"
+  ],
+  "bin": {
+    "omp-call": "bin/omp-call.mjs",
+    "omp-events": "bin/omp-events.mjs"
+  },
+  "omp": {
+    "extensions": [
+      "./extensions/index.ts"
+    ]
+  },
+  "pi": {
+    "extensions": [
+      "./extensions/index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@oh-my-pi/pi-coding-agent": ">=17.4.0"
+  },
+  "peerDependenciesMeta": {
+    "@oh-my-pi/pi-coding-agent": {
+      "optional": true
+    }
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "pack:check": "npm pack --dry-run"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bigidulka/omp-triggers.git"
+  },
+  "homepage": "https://github.com/bigidulka/omp-triggers#readme",
+  "bugs": {
+    "url": "https://github.com/bigidulka/omp-triggers/issues"
+  }
+}

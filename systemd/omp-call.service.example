@@ -1,0 +1,11 @@
+# ~/.config/systemd/user/omp-call.service
+# Invoke a named live OMP session from a systemd user unit.
+[Unit]
+Description=Send a prompt to a live OMP session via omp-session-bridge
+After=default.target
+
+[Service]
+Type=oneshot
+# Must match the environment used by the OMP process when needed.
+Environment=OMP_SESSION_BRIDGE_DIR=%t/omp-session-bridge
+ExecStart=/usr/bin/env omp-call --name my-live-omp "Run the scheduled check and summarize only failures."

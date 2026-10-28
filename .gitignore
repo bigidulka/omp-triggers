@@ -1,0 +1,29 @@
+# Local agent history and scratch artifacts
+.pi-subagents/
+.claude/
+.omp/
+.worktree/
+tmp/
+work/
+outputs/
+
+# Runtime state and credentials
+.env
+.env.*
+!.env.example
+*.token
+*.lock
+*.log
+*.db
+*.db-shm
+*.db-wal
+receiver.json
+state/
+
+# Dependencies and generated files
+node_modules/
+__pycache__/
+*.py[cod]
+*.tgz
+coverage/
+.DS_Store
