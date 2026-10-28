@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { eventDirectory, EventStore, readPrivateJson, withEventLock } from "../lib/event-store.mjs";
-import { startEventReceiver } from "../lib/event-receiver.mjs";
+import { startTriggerDaemon } from "../lib/trigger-daemon.mjs";
 import { receiverStatus, ensureReceiver } from "../lib/event-service.mjs";
 import { writeRegistryAtomic } from "../lib/registry.mjs";
 
@@ -13,7 +13,7 @@ export async function main(args = process.argv.slice(2)) {
   if (command === "serve") {
     // Hold a distinct lifetime lock. Subscription autostart uses receiver-start.
     await withEventLock(directory, "receiver-server", async () => {
-      const receiver = await startEventReceiver({ directory, port: Number(process.env.OMP_SESSION_BRIDGE_EVENT_PORT || 7341) });
+      const receiver = await startTriggerDaemon({ directory: path.dirname(directory), port: Number(process.env.OMP_SESSION_BRIDGE_EVENT_PORT || 7341) });
       const descriptor = path.join(directory, "receiver.json");
       await writeRegistryAtomic(descriptor, { baseUrl: receiver.baseUrl, instanceId: receiver.instanceId, pid: process.pid }, directory);
       await new Promise((resolve) => { process.once("SIGTERM", resolve); process.once("SIGINT", resolve); });
@@ -31,8 +31,8 @@ export async function main(args = process.argv.slice(2)) {
   } else if (command === "emit") {
     // Raw event data comes through stdin; no shell interpolation or printed credentials.
     const id = args.shift(); if (!id || args.length) throw new Error("usage: omp-events emit SUBSCRIPTION_ID < event.json");
-    const store = new EventStore(directory); const route = await store.load(id);
-    const tokenFile = path.join(directory, `${route.id}.token`); const st = await fs.lstat(tokenFile);
+    if (!/^[a-f0-9-]{36}$/.test(id)) throw new Error("invalid subscription ID");
+    const tokenFile = path.join(directory, `${id}.token`); const st = await fs.lstat(tokenFile);
     if (!st.isFile() || st.isSymbolicLink() || (st.mode & 0o077) || (process.getuid && st.uid !== process.getuid())) throw new Error("unsafe subscription credential file");
     const token = (await fs.readFile(tokenFile, "utf8")).trim(); const live = await receiverStatus(directory);
     if (!live.available) throw new Error("receiver is offline; run omp-events start");

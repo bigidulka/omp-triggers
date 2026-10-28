@@ -1,6 +1,6 @@
 {
   "name": "omp-triggers",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Wake an OMP agent in the same chat with schedules, incoming webhooks and external script signals",
   "type": "module",
   "license": "MIT",
@@ -21,6 +21,7 @@
     "bin",
     "clients/*.py",
     "systemd",
+    "docs",
     "README.md",
     "LICENSE"
   ],
@@ -51,7 +52,7 @@
     "pack:check": "npm pack --dry-run"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=22.13"
   },
   "repository": {
     "type": "git",

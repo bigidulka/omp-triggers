@@ -17,7 +17,7 @@ async function fixture(t) {
   const token = (await fs.readFile(subscription.tokenFile, "utf8")).trim();
   let bridge; const sent = []; let idle = true;
   const start = async (otherBinding = binding, timeoutMs = 5000) => {
-    bridge = new SessionBridge({ ...otherBinding, directory: path.join(root, "runtime"), stateDirectory, timeoutMs, isIdle: () => idle, sendUserMessage: (prompt) => sent.push(prompt) }); await bridge.start(); return bridge;
+    bridge = new SessionBridge({ legacyBackend: true, ...otherBinding, directory: path.join(root, "runtime"), stateDirectory, timeoutMs, isIdle: () => idle, sendUserMessage: (prompt) => sent.push(prompt) }); await bridge.start(); return bridge;
   };
   const send = async (body, credential = token) => {
     const response = await fetch(`${receiver.baseUrl}/v1/events/${subscription.id}`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${credential}` }, body: JSON.stringify(body) });

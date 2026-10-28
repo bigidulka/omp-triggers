@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { SessionBridge } from "../lib/server.mjs";
+import { receiverStatus } from "../lib/event-service.mjs";
 
 function python(args, env) {
   return new Promise((resolve, reject) => {
@@ -17,8 +18,9 @@ function python(args, env) {
 test("Python schedule API has live socket parity", async (t) => {
   const root = path.resolve(import.meta.dirname, ".."); const runtime = await fs.mkdtemp(path.join(os.tmpdir(), "pi-session-python-runtime-")); const state = await fs.mkdtemp(path.join(os.tmpdir(), "pi-session-python-state-"));
   const bridge = new SessionBridge({ sessionId: "python-session", sessionFile: "/tmp/python.jsonl", cwd: "/tmp/python", directory: runtime, stateDirectory: state, isIdle: () => true, sendUserMessage: () => {} });
+  const previousPort = process.env.OMP_SESSION_BRIDGE_EVENT_PORT; process.env.OMP_SESSION_BRIDGE_EVENT_PORT = "0";
+  t.after(async () => { if (previousPort === undefined) delete process.env.OMP_SESSION_BRIDGE_EVENT_PORT; else process.env.OMP_SESSION_BRIDGE_EVENT_PORT = previousPort; await bridge.close(); const live = await receiverStatus(path.join(state, "events")); if (live.available) { process.kill(live.pid, "SIGTERM"); await new Promise((r) => setTimeout(r, 150)); } await fs.rm(runtime, { recursive: true, force: true }); await fs.rm(state, { recursive: true, force: true }); });
   await bridge.start();
-  t.after(async () => { await bridge.close(); await fs.rm(runtime, { recursive: true, force: true }); await fs.rm(state, { recursive: true, force: true }); });
   const source = "import json; from omp_session_bridge import schedule_create, schedule_list; x=schedule_create(session_id='python-session', every='1m', prompt='python parity', max_queue_wait='1h', coalesce_key='python:parity', directory=None); print(json.dumps({'id':x['taskId'],'count':len(schedule_list(session_id='python-session')),'queue':x['task']['maxQueueWaitMs'],'key':x['task']['coalesceKey']}))";
   const output = await python(["-c", source], { ...process.env, PYTHONPATH: path.join(root, "clients"), OMP_SESSION_BRIDGE_DIR: runtime });
   const result = JSON.parse(output); assert.equal(result.count, 1); assert.ok(result.id); assert.equal(result.queue, 3_600_000); assert.equal(result.key, "python:parity");

@@ -12,7 +12,7 @@ async function makeBridge(options = {}) {
   const stateDirectory = path.join(directory, "state");
   let idle = options.idle ?? true;
   const sent = [];
-  const bridge = new SessionBridge({ sessionId: options.sessionId || "test-session", sessionFile: "/tmp/test.jsonl", cwd: "/tmp", directory, stateDirectory, timeoutMs: options.timeoutMs || 100, maxQueueLength: 2, isIdle: () => idle, sendUserMessage: (p) => sent.push(p) });
+  const bridge = new SessionBridge({ legacyBackend: true, sessionId: options.sessionId || "test-session", sessionFile: "/tmp/test.jsonl", cwd: "/tmp", directory, stateDirectory, timeoutMs: options.timeoutMs || 100, maxQueueLength: 2, isIdle: () => idle, sendUserMessage: (p) => sent.push(p) });
   await bridge.start();
   return { bridge, directory, stateDirectory, sent, setIdle: (value) => { idle = value; } };
 }
@@ -30,6 +30,16 @@ test("scheduled work waits idle without consuming execution timeout", async (t) 
   bridge.onMessageEnd({ role: "assistant", content: [{ type: "text", text: "cycle done" }] });
   bridge.onAgentSettled();
   assert.equal(settled, "cycle done");
+});
+
+test("terminal OMP provider errors fail a delivered run instead of returning a successful result", async (t) => {
+  const { bridge, directory } = await makeBridge();
+  t.after(async () => { await bridge.close(); await fs.rm(directory, { recursive: true, force: true }); });
+  let settled = false, failed;
+  bridge.enqueueScheduled("analyze", { onSettled: () => { settled = true; }, onFailed: (e) => { failed = e; } });
+  bridge.onMessageEnd({ role: "assistant", content: [], stopReason: "error" });
+  bridge.onAgentSettled();
+  assert.equal(settled, false); assert.equal(failed.code, "agent_error"); assert.equal(bridge.active, null);
 });
 
 test("scheduled queue wait has a distinct bounded deadline", async (t) => {
@@ -54,7 +64,7 @@ test("existing saved-session paths are canonicalized for durable binding", async
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "omp-session-bridge-canonical-"));
   const runtime = path.join(root, "runtime"); const state = path.join(root, "state"); const realCwd = path.join(root, "real-cwd"); const realSession = path.join(realCwd, "saved.jsonl");
   await fs.mkdir(realCwd); await fs.writeFile(realSession, ""); await fs.symlink(realCwd, path.join(root, "cwd-link"), "dir"); await fs.symlink(realSession, path.join(root, "session-link.jsonl"));
-  const bridge = new SessionBridge({ sessionId: "canonical", sessionFile: path.join(root, "session-link.jsonl"), cwd: path.join(root, "cwd-link"), directory: runtime, stateDirectory: state, isIdle: () => true, sendUserMessage: () => {} });
+  const bridge = new SessionBridge({ legacyBackend: true, sessionId: "canonical", sessionFile: path.join(root, "session-link.jsonl"), cwd: path.join(root, "cwd-link"), directory: runtime, stateDirectory: state, isIdle: () => true, sendUserMessage: () => {} });
   await bridge.start(); t.after(async () => { await bridge.close(); await fs.rm(root, { recursive: true, force: true }); });
   assert.equal(bridge.sessionFile, realSession); assert.equal(bridge.cwd, realCwd);
 });

@@ -17,6 +17,9 @@ outputs/
 *.db
 *.db-shm
 *.db-wal
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
 receiver.json
 state/
 

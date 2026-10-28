@@ -48,7 +48,7 @@ test("OMP loads the extension without creating an unsaved bridge", async (t) => 
   const temporary = await fs.mkdtemp(path.join(os.tmpdir(), "omp-session-bridge-root-extension-"));
   const bridgeDir = path.join(temporary, "bridge");
   const child = startRpc(["--no-session"], { ...process.env, OMP_SESSION_BRIDGE_DIR: bridgeDir });
-  t.after(async () => { child.kill("SIGTERM"); await Promise.race([once(child, "exit"), new Promise((resolve) => setTimeout(resolve, 2_000))]); await fs.rm(temporary, { recursive: true, force: true }); });
+  t.after(async () => { child.kill("SIGTERM"); await Promise.race([once(child, "exit"), new Promise((resolve) => setTimeout(resolve, 2_000))]); try { const descriptor = JSON.parse(await fs.readFile(path.join(temporary, "state", "events", "receiver.json"), "utf8")); process.kill(descriptor.pid, "SIGTERM"); await new Promise((r) => setTimeout(r, 150)); } catch {} await fs.rm(temporary, { recursive: true, force: true }); });
   const state = waitForResponse(child, "state"); child.stdin.write('{"id":"state","type":"get_state"}\n');
   assert.equal((await state).success, true);
   assert.deepEqual(await listRegistries(bridgeDir), []);
@@ -58,10 +58,10 @@ test("saved OMP session restart retains schedule state and replaces its socket",
   const temporary = await fs.mkdtemp(path.join(os.tmpdir(), "omp-session-bridge-saved-lifecycle-"));
   const bridgeDir = path.join(temporary, "bridge"); const stateDir = path.join(temporary, "state"); const sessionDir = path.join(temporary, "sessions"); const sessionFile = path.join(sessionDir, "saved.jsonl");
   await fs.mkdir(sessionDir, { recursive: true }); await fs.writeFile(sessionFile, JSON.stringify({ type: "session", version: 3, id: "9c2e3d54-9d4a-4dd0-80fd-841615941337", timestamp: new Date().toISOString(), cwd: temporary }) + "\n");
-  const environment = { ...process.env, OMP_SESSION_BRIDGE_DIR: bridgeDir, OMP_SESSION_BRIDGE_STATE_DIR: stateDir };
+  const environment = { ...process.env, OMP_SESSION_BRIDGE_EVENT_PORT: "0", OMP_SESSION_BRIDGE_DIR: bridgeDir, OMP_SESSION_BRIDGE_STATE_DIR: stateDir };
   const start = () => startRpc(["--session", sessionFile, "--session-dir", sessionDir], environment);
   let child = start();
-  t.after(async () => { child.kill("SIGTERM"); await Promise.race([once(child, "exit"), new Promise((resolve) => setTimeout(resolve, 2_000))]); await fs.rm(temporary, { recursive: true, force: true }); });
+  t.after(async () => { child.kill("SIGTERM"); await Promise.race([once(child, "exit"), new Promise((resolve) => setTimeout(resolve, 2_000))]); try { const descriptor = JSON.parse(await fs.readFile(path.join(temporary, "state", "events", "receiver.json"), "utf8")); process.kill(descriptor.pid, "SIGTERM"); await new Promise((r) => setTimeout(r, 150)); } catch {} await fs.rm(temporary, { recursive: true, force: true }); });
   const firstRegistry = await waitForRegistry(bridgeDir);
   const created = await request(firstRegistry.socketPath, { id: "create", method: "schedule.create", params: { every: "1m", prompt: "persist me" } });
   const taskId = created.response.result.taskId; const firstPid = firstRegistry.pid;

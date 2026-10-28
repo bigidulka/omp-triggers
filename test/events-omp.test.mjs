@@ -6,7 +6,8 @@ import os from "node:os";
 import http from "node:http";
 import crypto from "node:crypto";
 import { spawn } from "node:child_process";
-import { EventStore, eventDirectory } from "../lib/event-store.mjs";
+import { eventDirectory } from "../lib/event-store.mjs";
+import { TriggerClient } from "../lib/trigger-client.mjs";
 import { receiverStatus } from "../lib/event-service.mjs";
 
 const root = path.resolve(import.meta.dirname, "..");
@@ -23,22 +24,24 @@ async function stop(child) {
 test("real OMP agent creates its own webhook, consumes events, resumes offline inbox and deduplicates", { timeout: 60_000 }, async (t) => {
   const temporary = await fs.mkdtemp(path.join(os.tmpdir(), "omp-webhook-live-"));
   const agent = path.join(temporary, "agent"); await fs.mkdir(agent);
-  const state = path.join(temporary, "state"); const directory = eventDirectory(state); const store = new EventStore(directory);
+  const state = path.join(temporary, "state"); const directory = eventDirectory(state); const client = new TriggerClient({ binding: { sessionFile: path.join(temporary, "saved.jsonl"), cwd: temporary }, directory: state });
   const sessionFile = path.join(temporary, "saved.jsonl"); const sessionId = crypto.randomUUID();
   await fs.writeFile(sessionFile, JSON.stringify({ type: "session", version: 3, id: sessionId, timestamp: new Date().toISOString(), cwd: temporary }) + "\n");
-  let modelCalls = 0; let eventCalls = 0; let child; let stderr = ""; let stdout = "";
+  let modelCalls = 0; let eventCalls = 0; let child; let stderr = ""; let stdout = ""; let subscription; const receivedInstructions = [];
   const mock = http.createServer(async (req, res) => {
     let body = ""; for await (const chunk of req) body += chunk;
     const input = JSON.parse(body); modelCalls++;
     const last = input.messages.at(-1);
     const lastText = typeof last?.content === "string" ? last.content : JSON.stringify(last?.content);
     const isInit = last?.role === "user" && lastText.includes("INITIALIZE_TEST_WEBHOOK");
-    if (last?.role === "user" && !isInit) eventCalls++;
-    const delta = isInit ? { role: "assistant", tool_calls: [{ index: 0, id: "call_subscribe", type: "function", function: { name: "write", arguments: JSON.stringify({ path: "xd://session_event_write", i: "Create webhook on this chat", content: JSON.stringify({ action: "create", name: "live-event-test", instruction: "Analyze the external signal and reply OMP-WEBHOOK-E2E-OK." }) }) } }] } : { role: "assistant", content: last?.role === "tool" ? "SUBSCRIPTION-READY" : "OMP-WEBHOOK-E2E-OK" };
+    const isEdit = last?.role === "user" && lastText.includes("EDIT_TEST_TRIGGER");
+    if (last?.role === "user" && !isInit && !isEdit) { eventCalls++; receivedInstructions.push(lastText); }
+    const mutation = isInit ? { action: "create", name: "live-event-test", source: { type: "webhook" }, prompt: "Analyze the external signal and reply OMP-WEBHOOK-E2E-OK." } : { action: "update", id: subscription?.id, expectedRevision: 1, prompt: "UPDATED-INSTRUCTION: analyze the signal and reply OMP-WEBHOOK-E2E-OK." };
+    const delta = isInit || isEdit ? { role: "assistant", tool_calls: [{ index: 0, id: isInit ? "call_subscribe" : "call_edit", type: "function", function: { name: "write", arguments: JSON.stringify({ path: "xd://trigger_manage", i: "Manage trigger on this chat", content: JSON.stringify(mutation) }) } }] } : { role: "assistant", content: last?.role === "tool" ? (lastText.includes('"revision":2') ? "TRIGGER-EDIT-READY" : "SUBSCRIPTION-READY") : "OMP-WEBHOOK-E2E-OK" };
     res.writeHead(200, { "content-type": "text/event-stream" });
     const base = { id: "chatcmpl-local-test", object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), model: "probe" };
     res.write(`data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta, finish_reason: null }] })}\n\n`);
-    res.write(`data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: {}, finish_reason: isInit ? "tool_calls" : "stop" }], usage: { prompt_tokens: 100, completion_tokens: 10, total_tokens: 110 } })}\n\ndata: [DONE]\n\n`); res.end();
+    res.write(`data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: {}, finish_reason: isInit || isEdit ? "tool_calls" : "stop" }], usage: { prompt_tokens: 100, completion_tokens: 10, total_tokens: 110 } })}\n\ndata: [DONE]\n\n`); res.end();
   });
   await new Promise((resolve) => mock.listen(0, "127.0.0.1", resolve));
   await fs.writeFile(path.join(agent, "models.yml"), JSON.stringify({ providers: { "webhook-test": { baseUrl: `http://127.0.0.1:${mock.address().port}/v1`, apiKey: "local-test-only", api: "openai-completions", models: [{ id: "probe", name: "Local webhook probe", reasoning: false, input: ["text"], contextWindow: 131072, maxTokens: 4096 }] } } }));
@@ -48,20 +51,20 @@ test("real OMP agent creates its own webhook, consumes events, resumes offline i
     child.stdout.on("data", (chunk) => { stdout += chunk; }); child.stderr.on("data", (chunk) => { stderr += chunk; }); return child;
   };
   t.after(async () => {
-    await stop(child); const live = await receiverStatus(directory); if (live.available) process.kill(live.pid, "SIGTERM");
+    await stop(child); const live = await receiverStatus(directory);
     await new Promise((r) => mock.close(r));
     if (process.env.OMP_EVENT_E2E_EVIDENCE_DIR) {
       await fs.mkdir(process.env.OMP_EVENT_E2E_EVIDENCE_DIR, { recursive: true });
-      await fs.writeFile(path.join(process.env.OMP_EVENT_E2E_EVIDENCE_DIR, "omp-event-e2e.json"), JSON.stringify({ model: "local deterministic HTTP stub; no real provider used", modelCalls, eventCalls, stderr, hasWebhookToolCall: (await fs.readFile(sessionFile, "utf8")).includes("xd://session_event_write"), receipts: await store.list({ sessionFile, cwd: temporary }).then((routes) => routes.flatMap((route) => route.events.map(({ eventId, state, acceptedAt, deliveredAt, settledAt }) => ({ eventId, state, acceptedAt, deliveredAt, settledAt })))) }, null, 2));
+      await fs.writeFile(path.join(process.env.OMP_EVENT_E2E_EVIDENCE_DIR, "omp-event-e2e.json"), JSON.stringify({ model: "local deterministic HTTP stub; no real provider used", modelCalls, eventCalls, stderr, hasWebhookToolCall: (await fs.readFile(sessionFile, "utf8")).includes("xd://trigger_manage"), receipts: subscription ? (await client.call("history", { id: subscription.id })).runs : [] }, null, 2));
     }
+    if (live.available) { process.kill(live.pid, "SIGTERM"); await new Promise((r) => setTimeout(r, 150)); }
     await fs.rm(temporary, { recursive: true, force: true });
   });
   const binding = { sessionFile, cwd: temporary };
   start(); child.stdin.write(JSON.stringify({ id: "init", type: "prompt", message: "INITIALIZE_TEST_WEBHOOK" }) + "\n");
-  let subscription;
-  try { subscription = await until(async () => (await store.list(binding))[0]); }
-  catch (error) { throw new Error(`${error.message}; OMP stderr: ${stderr}; last output: ${stdout.slice(-1600)}`); }
-  assert.equal(subscription.binding.sessionFile, sessionFile);
+  try { subscription = await until(async () => (await receiverStatus(directory)).available && (await client.call("list")).triggers[0]); }
+  catch (error) { throw new Error(`${error.message}; receiver: ${await fs.readFile(path.join(directory, "receiver.log"), "utf8").catch(() => "none")}; OMP stderr: ${stderr}; last output: ${stdout.slice(-1600)}`); }
+  assert.equal(subscription.source.type, "webhook");
   await until(async () => (await fs.readFile(sessionFile, "utf8")).includes("SUBSCRIPTION-READY"));
   const live = await until(async () => { const value = await receiverStatus(directory); return value.available && value; });
   const token = (await fs.readFile(path.join(directory, `${subscription.id}.token`), "utf8")).trim();
@@ -70,15 +73,29 @@ test("real OMP agent creates its own webhook, consumes events, resumes offline i
     assert.equal(response.status, 202); return response.json();
   };
   await post("live:1");
-  await until(async () => (await store.receipts(subscription.id, binding)).find((r) => r.eventId === "live:1")?.state === "settled");
+  await until(async () => (await client.call("history", { id: subscription.id })).runs.find((r) => r.eventId === "live:1")?.state === "settled");
   assert.ok((await fs.readFile(sessionFile, "utf8")).includes("OMP-WEBHOOK-E2E-OK"));
+  const liveReceipt = (await client.call("history", { id: subscription.id })).runs[0];
+  assert.ok(liveReceipt.response?.messageId, "native OMP message ID is recorded");
+  const recordedReply = (await fs.readFile(sessionFile, "utf8")).trim().split("\n").map(JSON.parse).find((entry) => entry.id === liveReceipt.response.messageId);
+  assert.equal(recordedReply?.message?.role, "assistant", "receipt points to the actual saved assistant entry");
+  child.stdin.write(JSON.stringify({ id: "edit", type: "prompt", message: "EDIT_TEST_TRIGGER: change the saved instruction for this same webhook." }) + "\n");
+  await until(async () => (await fs.readFile(sessionFile, "utf8")).includes("TRIGGER-EDIT-READY"));
+  const edited = (await client.call("get", { id: subscription.id })).trigger;
+  assert.equal(edited.revision, 2); assert.equal(edited.webhookUrl, subscription.webhookUrl);
+  assert.equal((await fs.readFile(edited.tokenFile, "utf8")).trim(), token);
   await stop(child);
   const offline = await post("offline:2"); assert.equal(offline.state, "queued");
+  const offlineSchedule = (await client.call("create", { name: "offline-clock", source: { type: "schedule", at: new Date(Date.now() + 250).toISOString() }, prompt: "Check status and reply OMP-WEBHOOK-E2E-OK." })).trigger;
+  await until(async () => (await client.call("history", { id: offlineSchedule.id })).runs[0]?.state === "queued");
   start();
-  await until(async () => (await store.receipts(subscription.id, binding)).find((r) => r.eventId === "offline:2")?.state === "settled");
+  await until(async () => (await client.call("history", { id: offlineSchedule.id })).runs[0]?.state === "settled");
+  await until(async () => (await client.call("history", { id: subscription.id })).runs.find((r) => r.eventId === "offline:2")?.state === "settled");
   const callsBeforeDuplicate = modelCalls;
   assert.equal((await post("live:1")).duplicate, true);
   await new Promise((r) => setTimeout(r, 400));
   assert.equal(modelCalls, callsBeforeDuplicate);
-  assert.equal(eventCalls, 2);
+  assert.equal(eventCalls, 3);
+  assert.equal((await client.call("history", { id: subscription.id })).runs.find((r) => r.eventId === "offline:2").revision, 2);
+  assert.ok(receivedInstructions.some((text) => text.includes("UPDATED-INSTRUCTION")));
 });

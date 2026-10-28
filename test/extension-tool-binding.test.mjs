@@ -9,7 +9,10 @@ const projectRoot = path.resolve(import.meta.dirname, "..");
 
 async function extensionFixture(t, prefix) {
   const temporary = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
-  t.after(() => fs.rm(temporary, { recursive: true, force: true }));
+  t.after(async () => {
+    try { const descriptor = JSON.parse(await fs.readFile(path.join(temporary, "state", "events", "receiver.json"), "utf8")); process.kill(descriptor.pid, "SIGTERM"); await new Promise((r) => setTimeout(r, 150)); } catch {}
+    await fs.rm(temporary, { recursive: true, force: true });
+  });
   const sessionFile = path.join(temporary, "saved.jsonl"); const runtime = path.join(temporary, "runtime"); const state = path.join(temporary, "state");
   await fs.writeFile(sessionFile, "");
   await fs.mkdir(path.join(temporary, "extensions"), { recursive: true });
@@ -20,7 +23,7 @@ async function extensionFixture(t, prefix) {
 
 function invoke(fixture) {
   return spawnSync(process.execPath, ["--experimental-strip-types", fixture.script], {
-    env: { ...process.env, OMP_SESSION_BRIDGE_DIR: fixture.runtime, OMP_SESSION_BRIDGE_STATE_DIR: fixture.state }, encoding: "utf8",
+    env: { ...process.env, OMP_SESSION_BRIDGE_EVENT_PORT: "0", OMP_SESSION_BRIDGE_DIR: fixture.runtime, OMP_SESSION_BRIDGE_STATE_DIR: fixture.state }, encoding: "utf8",
   });
 }
 
@@ -42,7 +45,7 @@ test("registered OMP current-session create self-starts from execution context",
   assert.equal(run.status, 0, run.stderr);
   const output = JSON.parse(run.stdout);
   assert.ok(output.created.taskId);
-  assert.deepEqual(output.tools, ["session_schedule_read", "session_schedule_write", "session_event_write", "session_event_read"]);
+  assert.deepEqual(output.tools, ["session_schedule_read", "session_schedule_write", "trigger_manage", "session_event_write", "session_event_read"]);
   assert.match(output.write.description, /bound saved session/);
   assert.match(output.write.description, /delayed, periodic, every-N-minutes, cron, reminder, watchdog, or recurring supervisor/);
   assert.match(output.write.description, /write path=xd:\/\/session_schedule_write/);
@@ -50,10 +53,9 @@ test("registered OMP current-session create self-starts from execution context",
   assert.equal("sessionId" in output.parameters.properties, false);
   assert.equal("sessionFile" in output.parameters.properties, false);
   assert.deepEqual(output.identity.session, { sessionId: "saved-tool-session", cwd: fixture.temporary });
-  assert.match(output.guidance.systemPrompt, /TEMPORAL INTENT ROUTING/);
-  assert.match(output.guidance.systemPrompt, /MUST NOT use bash, crontab, systemd timers, Claude scheduled_tasks, scripts, or files/);
-  assert.match(output.guidance.systemPrompt, /write path=xd:\/\/session_schedule_write/);
-  assert.match(output.guidance.systemPrompt, /scheduled supervisor prompt re-enters this same session/);
+  assert.match(output.guidance.systemPrompt, /TRIGGER INTENT ROUTING/);
+  assert.match(output.guidance.systemPrompt, /write path=xd:\/\/trigger_manage/);
+  assert.match(output.guidance.systemPrompt, /natural language/);
   assert.match(output.guidance.systemPrompt, /saved-tool-session/);
   assert.match(output.commands.schedule, /CURRENT-TUI prompt/);
   assert.match(output.commands.loop, /CURRENT-TUI prompts \(not subagent workflows\)/);
@@ -169,7 +171,10 @@ test("OMP loads the root extension with callable current-session tools", async (
   const temporary = await fs.mkdtemp(path.join(os.tmpdir(), "omp-session-extension-load-"));
   const sessionFile = path.join(temporary, "saved.jsonl"); const runtime = path.join(temporary, "runtime"); const state = path.join(temporary, "state");
   await fs.writeFile(sessionFile, "");
-  t.after(() => fs.rm(temporary, { recursive: true, force: true }));
+  t.after(async () => {
+    try { const descriptor = JSON.parse(await fs.readFile(path.join(temporary, "state", "events", "receiver.json"), "utf8")); process.kill(descriptor.pid, "SIGTERM"); await new Promise((r) => setTimeout(r, 150)); } catch {}
+    await fs.rm(temporary, { recursive: true, force: true });
+  });
   const script = path.join(temporary, "invoke.mjs");
   await fs.writeFile(script, `
     const tools = new Map(); const handlers = new Map();
@@ -182,9 +187,9 @@ test("OMP loads the root extension with callable current-session tools", async (
     await handlers.get("session_shutdown")({ reason: "test" }, ctx);
     console.log(JSON.stringify({ tools: [...tools.keys()], taskId: created.details.taskId, listed: listed.details.tasks.map((task) => task.id) }));
   `);
-  const run = spawnSync(process.execPath, ["--experimental-strip-types", script], { env: { ...process.env, OMP_SESSION_BRIDGE_DIR: runtime, OMP_SESSION_BRIDGE_STATE_DIR: state }, encoding: "utf8" });
+  const run = spawnSync(process.execPath, ["--experimental-strip-types", script], { env: { ...process.env, OMP_SESSION_BRIDGE_EVENT_PORT: "0", OMP_SESSION_BRIDGE_DIR: runtime, OMP_SESSION_BRIDGE_STATE_DIR: state }, encoding: "utf8" });
   assert.equal(run.status, 0, run.stderr);
   const output = JSON.parse(run.stdout);
-  assert.deepEqual(output.tools, ["session_schedule_read", "session_schedule_write", "session_event_write", "session_event_read"]);
+  assert.deepEqual(output.tools, ["session_schedule_read", "session_schedule_write", "trigger_manage", "session_event_write", "session_event_read"]);
   assert.deepEqual(output.listed, [output.taskId]);
 });
